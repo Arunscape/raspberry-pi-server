@@ -3,48 +3,58 @@ version: '3'
 services:
 ################################################################################
   transmission:
-    image: haugene/transmission-openvpn:latest-alpine
+    image: haugene/transmission-openvpn
     container_name: transmission
     cap_add:
       - NET_ADMIN
     devices:
       - "/dev/net/tun"
     restart: unless-stopped
+    logging:
+            driver: json-file
+            options:
+                max-size: 10m
     ports:
-      - "9091:9091"
-      - "8888:8888"
-      - "8989:8989" #sonarr
-      - "9117:9117" #jackett
-      - "7878:7878" #radarr
-      - "8686:8686" #lidarr
-      - "8096:8096" #jellyfin
-      - "8200:8200" #duplicati
+      - "0.0.0.0:9091:9091"
+      - "0.0.0.0:8888:8888"
+      - "0.0.0.0:8989:8989" #sonarr
+      - "0.0.0.0:9117:9117" #jackett
+      - "0.0.0.0:7878:7878" #radarr
+      - "0.0.0.0:8686:8686" #lidarr
+      - "0.0.0.0:8096:8096" #jellyfin
     dns:
       - 1.1.1.1
       - 1.0.0.1
+      - "2606:4700:4700::1111"
+      - "2606:4700:4700::1001"
+
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ${MOUNT_POINT}/data/transmission-openvpn/data/:/data
-      - ${MOUNT_POINT}/data/downloads/:/downloads
+      - ${MOUNT_POINT}/transmission:/data
+      - ${MOUNT_POINT}/downloads/:/downloads
     environment:
+      - CREATE_TUN_DEVICE=true
       - OPENVPN_PROVIDER=${OPENVPN_PROVIDER}
+      - OPENVPN_CONFIG=${OPENVPN_CONFIG}
       - OPENVPN_USERNAME=${OPENVPN_USERNAME}
       - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
-      - OPENVPN_OPTS=--inactive 3600 --ping 10 --ping-exit 60
-      - LOCAL_NETWORK=${LOCAL_NETWORK}
-      - OPENVPN_CONFIG=${OPENVPN_CONFIG}
+      - WEBPROXY_ENABLED=true
+      # - LOCAL_NETWORK=${LOCAL_NETWORK}
+      # additional options
       - TRANSMISSION_WEB_UI=combustion
       - TRANSMISSION_BLOCKLIST_ENABLED=true
-      - TRANSMISSION_BLOCKLIST_URL=http://john.bitsurge.net/public/biglist.p2p.gz
-      - TRANSMISSION_PEER_LIMIT_GLOBAL=2000
-      - TRANSMISSION_PEER_LIMIT_PER_TORRENT=100
-      - TRANSMISSION_DOWNLOAD_QUEUE_ENABLED=true
-      - TRANSMISSION_DOWNLOAD_QUEUE_SIZE=10
-      - TRANSMISSION_QUEUE_STALLED_ENABLED=true
+      - TRANSMISSION_BLOCKLIST_URL="http://john.bitsurge.net/public/biglist.p2p.gz"
+      - TRANSMISSION_PEER_LIMIT_GLOBAL=1024
+      - TRANSMISSION_PEER_LIMIT_PER_TORRENT=128
       - TRANSMISSION_DOWNLOAD_DIR=/downloads
+      - TRANSMISSION_INCOMPLETE_DIR_ENABLED=true
+      - TRANSMISSION_DOWNLOAD_QUEUE_ENABLED=false
+      - TRANSMISSION_ENCRYPTION=1 # Prefer encrypted connections
+      # - TRANSMISSION_INCOMPLETE_DIR=
+      - OPENVPN_OPTS=--inactive 3600 --ping 10 --ping-exit 60  # restart container if connection is lost
 ################################################################################
   jackett:
-      image: linuxserver/jackett:latest
+      image: linuxserver/jackett
       container_name: jackett
       environment:
         - PUID=1000
@@ -52,24 +62,24 @@ services:
         - TZ=Canada/Mountain
         # - RUN_OPTS= #optional
       volumes:
-        - ${MOUNT_POINT}/jackett/config/:/config
-        - ${MOUNT_POINT}/downloads/:/downloads
+        - ${MOUNT_POINT}/jackett:/config
+        - ${MOUNT_POINT}/downloads:/downloads
       restart: unless-stopped
       network_mode: "service:transmission"
       depends_on:
         - transmission
 ################################################################################
   sonarr:
-    image: linuxserver/sonarr:latest
+    image: linuxserver/sonarr
     container_name: sonarr
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Canada/Mountain
     volumes:
-      - ${MOUNT_POINT}/sonarr/config/:/config
-      - ${MOUNT_POINT}/data/tv/:/tv
-      - ${MOUNT_POINT}/data/downloads/:/downloads
+      - ${MOUNT_POINT}/sonarr:/config
+      - ${MOUNT_POINT}/tv:/tv
+      - ${MOUNT_POINT}/downloads:/downloads
     restart: unless-stopped
     network_mode: "service:transmission"
     depends_on:
@@ -77,16 +87,16 @@ services:
       - jackett
 ################################################################################
   radarr:
-    image: linuxserver/radarr:latest
+    image: linuxserver/radarr
     container_name: radarr
     environment:
       - PUID=1000
       - PGID=1000
       - TZ=Canada/Mountain
     volumes:
-      - ${MOUNT_POINT}/radarr/config/:/config
-      - ${MOUNT_POINT}/data/movies/:/movies
-      - ${MOUNT_POINT}/data/downloads/:/downloads
+      - ${MOUNT_POINT}/radarr:/config
+      - ${MOUNT_POINT}/movies:/movies
+      - ${MOUNT_POINT}/downloads:/downloads
     restart: unless-stopped
     network_mode: "service:transmission"
     depends_on:
@@ -94,16 +104,16 @@ services:
       - jackett
 ################################################################################
   lidarr:
-      image: linuxserver/lidarr:latest
+      image: linuxserver/lidarr
       container_name: lidarr
       environment:
         - PUID=1000
         - PGID=1000
         - TZ=Canada/Mountain
       volumes:
-        - ${MOUNT_POINT}/lidarr/config/:/config
-        - ${MOUNT_POINT}/data/music/:/music
-        - ${MOUNT_POINT}/data/downloads/:/downloads
+        - ${MOUNT_POINT}/lidarr:/config
+        - ${MOUNT_POINT}/music:/music
+        - ${MOUNT_POINT}/downloads/:/downloads
       restart: unless-stopped
       network_mode: "service:transmission"
       depends_on:
@@ -111,18 +121,16 @@ services:
       - jackett
 ################################################################################
   jellyfin:
-    image: linuxserver/jellyfin:latest
+    image: jellyfin/jellyfin
     container_name: jellyfin
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=Canada/Mountain
-      # - UMASK_SET=022 #optional
     volumes:
-      - ${MOUNT_POINT}/jellyfin/config/:/config
-      - ${MOUNT_POINT}/data/tv/:/data/tvshows
-      - ${MOUNT_POINT}/data/movies/:/data/movies
-      # - /path for transcoding:/transcode #optional
+      - ${MOUNT_POINT}/jellyfin:/config
+      - ${MOUNT_POINT}/tv:/media/tv
+      - ${MOUNT_POINT}/movies:/media/movies
+      - ${MOUNT_POINT}/music:/media/music
     # ports:
     #   - 8096:8096
     #   # - 8920:8920 #optional
@@ -131,22 +139,16 @@ services:
     depends_on:
       - transmission
 ################################################################################
-  duplicati:
-    image: linuxserver/duplicati:latest
-    container_name: duplicati
+  rclone:
+    image: tynor88/rclone
+    container_name: rclone
     environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Canada/Mountain
-    # environment:
+      CRON_SCHEDULE: 0 1/6 * * *
+      SYNC_COMMAND: rclone copy /data gdrivecrypt:/ --drive-chunk-size 256M --checkers 2 --transfers 4 --max-transfer 700G
     volumes:
-      - ${MOUNT_POINT}/duplicati/config:/config
-      - ${MOUNT_POINT}/duplicati/backups/:/backups
-      - ${MOUNT_POINT}/:/source
-    # ports:
-    #   - 8200:8200
+      - ${MOUNT_POINT}/rclone:/config
+      - ${MOUNT_POINT}/tv:/data/tv
+      - ${MOUNT_POINT}/movies:/data/movies
+      - ${MOUNT_POINT}/music:/data/music
+      - ${MOUNT_POINT}/games:/data/games
     restart: unless-stopped
-    network_mode: "service:transmission"
-    depends_on:
-      - transmission
-################################################################################
